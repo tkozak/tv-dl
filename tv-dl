@@ -70,7 +70,7 @@ class TVDownloader:
     
     @classmethod
     def download(cls, d, outfile):
-        cmd = ''
+        cmd = []
         if d[0] == 'rtmp':
             args = ''
             parms = d[2]
@@ -86,10 +86,19 @@ class TVDownloader:
             if 'rtmpdump_args' in parms:
                 args += ' '+parms['rtmpdump_args']
     
-            cmd = 'rtmpdump -r "{}" -o "{}" {}'.format(parms['url'], outfile, args)
+            cmd.append('rtmpdump -r "{}" -o "{}" {}'.format(parms['url'], outfile, args))
     
         elif d[0] == 'http':
-            cmd = 'wget -O "{}" "{}"'.format(d[1], d[2]['url'] )
+            if type(d[2]['url']) is list:
+                urlListFileName = '~tmp'
+                with open(urlListFileName, 'w') as urlListFile:
+                    for url in d[2]['url']:
+                        urlListFile.write(url + '\n')
+                cmd.append('wget -O "{}" -i "{}"'.format(d[1], urlListFileName))
+                cmd.append('rm "{}"'.format(urlListFileName))
+                cmd.append('del "{}"'.format(urlListFileName))
+            else:
+                cmd.append('wget -O "{}" "{}"'.format(d[1], d[2]['url']))
             
         elif d[0] == "text":
             open(outfile, 'wb').write(d[2])
@@ -97,8 +106,9 @@ class TVDownloader:
         else:
             raise ValueError("Nepodporovaný protokol: {}".format(d[0]) )
             
-        log.info('Příkaz: {}'.format(cmd))
-        os.system(cmd)
+        for command in cmd:
+            log.info('Příkaz: {}'.format(command))
+            os.system(command)
             
 
 if __name__ == "__main__":      

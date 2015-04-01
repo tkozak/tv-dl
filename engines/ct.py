@@ -7,7 +7,8 @@ __desc__ = "ČT (iVysílání)"
 __url__ = r"https?://www\.ceskatelevize\.cz/(porady|ivysilani)/.+"
 
 import re,os.path, urllib.request, urllib.parse, json, http.cookiejar, logging
-import xml.etree.ElementTree as ElementTree
+from collections import OrderedDict
+import json
 from urllib.parse import urlparse, unquote
 
 log = logging.getLogger()
@@ -78,50 +79,51 @@ class CtEngine:
         header = { 
             "Content-type": "application/x-www-form-urlencoded"        
         }
-        req = urllib.request.Request('http://www.ceskatelevize.cz/ivysilani/ajax/get-playlist-url', bytes(data, 'utf-8'), header )
+        req = urllib.request.Request('http://www.ceskatelevize.cz/ivysilani/ajax/get-client-playlist', bytes(data, 'utf-8'), header )
         data = json.loads(urlopen(req).read().decode('utf-8'))
         url = urllib.parse.unquote(data['url'])
                 
-        self.playlist = urlopen(url).read().decode('utf-8')
+        self.getPlaylist(url)
         self.getMovie()
-        self.videos = self.movie.findall('video')
-        
-        # setridime podle kvality: z popisku nechame jenom cislo
-        # kvuli audio-description verzi (label AD) pridame 0, abychom to mohli tridit jako cisla
-        self.videos = sorted(self.videos, key=lambda k: int(re.sub(r"\D", "", k.get('label')+"0")), reverse=True)
-        
-        if len(self.videos) == 0:
+        self.getStreams()
+
+        if len(self.streams) == 0:
             raise ValueError('Není k dispozici žádná kvalita videa.')
         
-    def getMovie(self):
-        xml = ElementTree.fromstring(self.playlist) 
+    def getPlaylist(self, playlistUrl):
+        rawData = urlopen(playlistUrl).read().decode('utf-8')
+        self.playlist = json.loads(rawData, 'utf-8')
 
-        for e in xml.findall('smilRoot/body/switchItem'):
-            i = e.get('id')
-            if not ('AD' in i or 'BO' in i):
-                self.movie = e
-                break
+    def getMovie(self):
+        self.movie = self.playlist['playlist'][0]
         
-        self.subtitles = None
-        for e in xml.findall('metaDataRoot/Playlist/PlaylistItem'):
-            if e.get('id') == self.movie.get('id'):
-                s = e.find('SubtitlesURL')
-                if s is not None:
-                    self.subtitles = s.text
+        self.subtitles = None # TODO
+
+    def getStreams(self):
+        rawStreams = urlopen(self.movie['streamUrls']['main']).read().decode('utf-8')
+        lines = rawStreams.rstrip().split('\n')
+
+        bandwidthsRaw = list(filter(lambda s: str.startswith(s, '#'), lines[1:]))
+        streams = list(filter(lambda s: not str.startswith(s, '#'), lines))
+
+        bandwidths = [re.sub(r'^.*BANDWIDTH=', '', b) for b in bandwidthsRaw]
+        qualityMap = {'500000': '288p', '1032000': '404p', '2048000': '576p', '3584000': '720p'}
+        qualities = [qualityMap[b] for b in bandwidths]
+
+        self.streams = OrderedDict(zip(qualities, streams))
 
     def qualities(self):
-        return [( v.get('label'), v.get('label') ) for v in self.videos] + ([('srt', 'Titulky')] if self.subtitles is not None else [] )
+        return list(zip(self.streams.keys(), self.streams.keys())) + ([('srt', 'Titulky')] if self.subtitles is not None else [])
       
     def movies(self):        
-        return [ ('0', re.findall(b'<title>(.+?) &mdash;', self.b_page)[0].decode('utf-8')) ]
+        return [ ('0', self.movie['title']) ]
 
     def get_video(self, quality):
-        for video in self.videos:
-            if video.get('label') == quality:
-                log.info('Vybraná kvalita: {}'.format(quality))
-                return video
-                
-        raise ValueError('Není k dispozici zadaná kvalita videa.')
+        if not quality in self.streams:
+            raise ValueError('Není k dispozici zadaná kvalita videa.')
+    
+        log.info('Vybraná kvalita: {}'.format(quality))
+        return self.streams[quality]
                 
     def download(self, quality, movie):
         if quality == 'srt':
@@ -129,19 +131,18 @@ class CtEngine:
         if quality:
             video = self.get_video(quality)
         else:
-            video = self.videos[0]
-            log.info('Automaticky vybraná kvalita: {}'.format(video.get('label')) )
+            bestQuality = list(self.streams.keys())[-1]
+            video = self.streams[bestQuality]
+            log.info('Automaticky vybraná kvalita: {}.'.format(bestQuality))
 
-        base = self.movie.get('base')
-        src = video.get('src')
-        filename = os.path.basename( src)[:-3] + 'flv'
-        parsedurl = urlparse(base)
-        app = parsedurl.path[1:] + '?' + parsedurl.query
-
-        # rtmpdump --live kvůli restartům - viz http://www.abclinuxu.cz/blog/pb/2011/5/televize-9-ctstream-3#18
-        return ('rtmp', filename, { 'url': base, 'playpath': src, 'app' : app, 'rtmpdump_args' : '--live'} )
+        filename =  self.movie['title'] + '.mp4'
+        urlParts = self.getVideoParts(video)
+        return ('http', filename, {'url': urlParts})
         
-    def download_srt(self):
+    def getVideoParts(self, video):
+        return list(filter(lambda s: not str.startswith(s, '#'), urlopen(video).read().decode('utf-8').rstrip().split('\n')))
+
+    def download_srt(self): #TODO
         if self.subtitles is None:
             raise ValueError('Titulky nejsou k dispozici.')
         
