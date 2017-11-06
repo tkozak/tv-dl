@@ -103,10 +103,10 @@ class CtEngine:
         rawStreams = urlopen(self.movie['streamUrls']['main']).read().decode('utf-8')
         lines = rawStreams.rstrip().split('\n')
 
-        bandwidthsRaw = list(filter(lambda s: str.startswith(s, '#'), lines[1:]))
+        bandwidthsRaw = list(filter(lambda s: str.startswith(s, '#') and s.find('BANDWIDTH=') != -1, lines[1:]))
         streams = list(filter(lambda s: not str.startswith(s, '#'), lines))
 
-        bandwidths = [re.sub(r'^.*BANDWIDTH=', '', b) for b in bandwidthsRaw]
+        bandwidths = [re.sub(r'^.*BANDWIDTH=([0-9]+)[^0-9]?.*$', '\\1', b) for b in bandwidthsRaw]
         qualityMap = {'500000': '288p', '1032000': '404p', '2048000': '576p', '3584000': '720p'}
         qualities = [qualityMap[b] for b in bandwidths]
 
