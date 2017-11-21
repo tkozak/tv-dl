@@ -92,7 +92,7 @@ class CtEngine:
         
     def getPlaylist(self, playlistUrl):
         rawData = urlopen(playlistUrl).read().decode('utf-8')
-        self.playlist = json.loads(rawData, 'utf-8')
+        self.playlist = json.loads(rawData)
 
     def getMovie(self):
         self.movie = self.playlist['playlist'][0]
@@ -107,7 +107,7 @@ class CtEngine:
         streams = list(filter(lambda s: not str.startswith(s, '#'), lines))
 
         bandwidths = [re.sub(r'^.*BANDWIDTH=([0-9]+)[^0-9]?.*$', '\\1', b) for b in bandwidthsRaw]
-        qualityMap = {'500000': '288p', '1032000': '404p', '2048000': '576p', '3584000': '720p'}
+        qualityMap = {'500000': '288p', '1032000': '404p', '2048000': '576p', '3584000': '720p', '6144000': '1080p'}
         qualities = [qualityMap[b] for b in bandwidths]
 
         self.streams = OrderedDict(zip(qualities, streams))
